@@ -1,41 +1,12 @@
-use std::fs::{self, File, read_to_string};
-use std::io::{self, Read, Seek};
-use std::path::Path;
-use std::{array, env};
-// use total_delete::total_delete_file;
-
-// OBS THIS WONT FOLLOW SYMLINKSL
+use std::env;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let Err(error) = total_delete::run(&args) else {
-        return;
+    let args = env::args().collect::<Vec<String>>()[1..].to_vec();
+
+    if let Err((path, error)) = total_delete::run(&args) {
+        match path {
+            Some(path) => println!("ERROR at \"{}\": {}", path, error.kind()),
+            None => println!("ERROR: {}", error),
+        }
     };
-    match error.kind() {
-        io::ErrorKind::NotFound => {
-            panic!("file not found");
-        }
-        io::ErrorKind::PermissionDenied => {
-            panic!("permission denied");
-        }
-        io::ErrorKind::PermissionDenied => {
-            panic!("permission denied");
-        }
-
-        io::ErrorKind::PermissionDenied => {
-            panic!("permission denied");
-        }
-
-        io::ErrorKind::PermissionDenied => {
-            panic!("permission denied");
-        }
-
-        io::ErrorKind::PermissionDenied => {
-            panic!("permission denied");
-        }
-
-        io::ErrorKind::PermissionDenied => {
-            panic!("permission denied");
-        }
-    }
 }

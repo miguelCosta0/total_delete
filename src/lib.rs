@@ -1,50 +1,62 @@
-mod error;
-
-use std::fs::{self, File, canonicalize, read_dir};
+use std::fs::{self, File, canonicalize};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::result;
 
-type Result<T> = result::Result<T, error::FileError>;
+type Result<T> = result::Result<T, (Option<String>, io::Error)>;
 
 const MiB: usize = 1024 * 1024;
 static MIB_NULL_DATA: [u8; MiB] = [0; MiB];
 const BACKSPACE: &str = "\x08";
 
-pub fn run(file_paths: &[String]) -> Result {
+pub fn run(file_paths: &[String]) -> Result<()> {
     let abs_paths = get_abs_paths(file_paths)?;
 
     for path in &abs_paths {
         println!("- {}", path.to_str().unwrap())
     }
 
-    println!("Are you sure you want to permanently delete these files? [y/n] ");
-
     let mut atempts: u8 = 0;
     loop {
         if atempts >= 3 {
-            panic!("Aborting...")
+            println!("Aborting...");
+            return Ok(());
         }
+
+        print!("Are you sure you want to permanently delete these files? [y/n] ");
+        io::stdout()
+            .flush()
+            .or_else(|e| Err((None, e)))?;
 
         let mut ans = String::new();
-        io::stdin().read_line(&mut ans)?;
+        io::stdin()
+            .read_line(&mut ans)
+            .or_else(|e| Err((None, e)))?;
+        ans.pop();
         ans.make_ascii_lowercase();
 
+        if ans == "no" || ans == "n" {
+            println!("Aborting...");
+            return Ok(());
+        }
         if ans == "yes" || ans == "ye" || ans == "y" {
             break;
-        } else if ans == "no" || ans == "n" {
-            panic!("Aborting...")
         }
-
         atempts += 1;
     }
 
     for path in &abs_paths {
-        let ftype = fs::metadata(path)?.file_type();
-        if ftype.is_dir() {
-            total_delete_dir(path)?;
+        let opt_path = Some(
+            path.to_string_lossy()
+                .to_string(),
+        );
+        let file_type = fs::metadata(path)
+            .or_else(|e| Err((opt_path.clone(), e)))?
+            .file_type();
+        if file_type.is_dir() {
+            return Err((opt_path, io::Error::other("Cannot remove directory")));
         } else {
-            total_delete_file(path)?;
+            total_delete_file(path).or_else(|e| Err((opt_path, e)))?;
         }
     }
 
@@ -54,40 +66,17 @@ pub fn run(file_paths: &[String]) -> Result {
 fn get_abs_paths(paths: &[String]) -> Result<Vec<PathBuf>> {
     let mut abs_paths: Vec<PathBuf> = Vec::with_capacity(paths.len());
     for path in paths {
-        let abspath =
-            canonicalize(path).or_else(|err| Err(error::FileError::new(path.as_ref(), err)))?;
+        let abspath = canonicalize(path).or_else(|err| Err((Some(path.to_string()), err)))?;
         abs_paths.push(abspath);
     }
     Ok(abs_paths)
 }
 
-fn total_delete_dir(dirpath: &Path) -> Result {
-    for dir_entry in read_dir(dirpath)? {
-        let dir_entry = dir_entry?;
-        let path = dir_entry.path();
-        if dir_entry.file_type()?.is_dir() {
-            total_delete_dir(&path)?;
-        } else {
-            total_delete_file(&path)?;
-        }
-    }
-
-    match (fs::remove_dir(dirpath)) {
-        Ok(_) => Ok(()),
-        Err(e) => match e.kind() {
-            io::ErrorKind::DirectoryNotEmpty => {
-                println!("ERROR: could not remove {}", dirpath);
-                Ok(())
-            }
-            _ => unknowerror,
-        },
-    }
-
-    Ok(())
-}
-
-fn total_delete_file(filepath: &Path) -> Result {
-    let mut file = File::options().read(true).write(true).open(&filepath)?;
+fn total_delete_file(filepath: &Path) -> io::Result<()> {
+    let mut file = File::options()
+        .read(true)
+        .write(true)
+        .open(&filepath)?;
     let file_size = file.metadata()?.len() as usize;
     let mut writen_len: usize = 0;
 
