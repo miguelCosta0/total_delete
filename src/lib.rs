@@ -5,8 +5,13 @@ use std::result;
 
 type Result<T> = result::Result<T, (Option<String>, io::Error)>;
 
-const MiB: usize = 1024 * 1024;
-static MIB_NULL_DATA: [u8; MiB] = [0; MiB];
+enum ProgramFlow {
+    Continue,
+    Abort,
+}
+
+const MEBIBYTE: usize = 1024 * 1024;
+static MIB_NULL_DATA: [u8; MEBIBYTE] = [0; MEBIBYTE];
 const BACKSPACE: &str = "\x08";
 
 pub fn run(file_paths: &[String]) -> Result<()> {
@@ -16,33 +21,13 @@ pub fn run(file_paths: &[String]) -> Result<()> {
         println!("- {}", path.to_str().unwrap())
     }
 
-    let mut atempts: u8 = 0;
-    loop {
-        if atempts >= 3 {
+    match get_confirmation() {
+        Ok(ProgramFlow::Continue) => (),
+        Ok(ProgramFlow::Abort) => {
             println!("Aborting...");
             return Ok(());
         }
-
-        print!("Are you sure you want to permanently delete these files? [y/n] ");
-        io::stdout()
-            .flush()
-            .or_else(|e| Err((None, e)))?;
-
-        let mut ans = String::new();
-        io::stdin()
-            .read_line(&mut ans)
-            .or_else(|e| Err((None, e)))?;
-        ans.pop();
-        ans.make_ascii_lowercase();
-
-        if ans == "no" || ans == "n" {
-            println!("Aborting...");
-            return Ok(());
-        }
-        if ans == "yes" || ans == "ye" || ans == "y" {
-            break;
-        }
-        atempts += 1;
+        Err(e) => return Err(e),
     }
 
     for path in &abs_paths {
@@ -72,6 +57,35 @@ fn get_abs_paths(paths: &[String]) -> Result<Vec<PathBuf>> {
     Ok(abs_paths)
 }
 
+fn get_confirmation() -> Result<ProgramFlow> {
+    let mut atempts: u8 = 0;
+    loop {
+        if atempts >= 3 {
+            return Ok(ProgramFlow::Abort);
+        }
+
+        print!("Are you sure you want to permanently delete these files? [y/n] ");
+        io::stdout()
+            .flush()
+            .or_else(|e| Err((None, e)))?;
+
+        let mut ans = String::new();
+        io::stdin()
+            .read_line(&mut ans)
+            .or_else(|e| Err((None, e)))?;
+        ans.pop();
+        ans.make_ascii_lowercase();
+
+        match ans.as_str() {
+            "no" | "n" => return Ok(ProgramFlow::Abort),
+            "yes" | "ye" | "y" => return Ok(ProgramFlow::Continue),
+            _ => println!("Invalid answer"),
+        }
+
+        atempts += 1;
+    }
+}
+
 fn total_delete_file(filepath: &Path) -> io::Result<()> {
     let mut file = File::options()
         .read(true)
@@ -89,7 +103,7 @@ fn total_delete_file(filepath: &Path) -> io::Result<()> {
 
     while writen_len < file_size {
         let remain_len = file_size - writen_len;
-        if remain_len < MiB {
+        if remain_len < MEBIBYTE {
             writen_len += file.write(&vec![0; remain_len])?;
         } else {
             writen_len += file.write(&MIB_NULL_DATA)?;
