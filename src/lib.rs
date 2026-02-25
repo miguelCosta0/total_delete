@@ -12,9 +12,12 @@ enum ProgramFlow {
 
 const MEBIBYTE: usize = 1024 * 1024;
 static MIB_NULL_DATA: [u8; MEBIBYTE] = [0; MEBIBYTE];
-const BACKSPACE: &str = "\x08";
 
 pub fn run(file_paths: &[String]) -> Result<()> {
+    if file_paths.len() == 0 {
+        return Err((None, io::Error::other("No arguments provided")));
+    }
+
     let abs_paths = get_abs_paths(file_paths)?;
 
     for path in &abs_paths {
@@ -109,22 +112,26 @@ fn total_delete_file(filepath: &Path) -> io::Result<()> {
             writen_len += file.write(&MIB_NULL_DATA)?;
         }
 
-        let progress = 100.0 * writen_len as f32 / file_size as f32;
-        let len_old_progress = progress_fmt.len();
-        progress_fmt = format!("{:0>5.2}%", progress);
+        let new_progress_fmt = {
+            let progress = 100.0 * writen_len as f32 / file_size as f32;
+            format!("{:05.2}%", progress)
+        };
 
-        print!("{}{}", BACKSPACE.repeat(len_old_progress), progress_fmt);
+        update_text_in_terminal(&progress_fmt, &new_progress_fmt);
+        progress_fmt = new_progress_fmt;
     }
 
-    println!(
-        "{}{:width$}",
-        BACKSPACE.repeat(progress_fmt.len()),
-        "Done",
-        width = progress_fmt.len()
-    );
+    update_text_in_terminal(&progress_fmt, "Done");
+    println!();
 
     file.flush()?;
     fs::remove_file(&filepath)?;
 
     Ok(())
+}
+
+fn update_text_in_terminal(old: &str, new: &str) {
+    let old_len = old.len();
+    const BS: &str = "\x08";
+    print!("{}{new:width$}", BS.repeat(old_len), width = old_len);
 }
