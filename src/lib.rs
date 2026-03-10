@@ -72,12 +72,14 @@ fn get_confirmation() -> Result<ProgramFlow> {
             .flush()
             .or_else(|e| Err((None, e)))?;
 
-        let mut ans = String::new();
-        io::stdin()
-            .read_line(&mut ans)
-            .or_else(|e| Err((None, e)))?;
-        ans.pop();
-        ans.make_ascii_lowercase();
+        let ans = {
+            let mut temp = String::new();
+            io::stdin()
+                .read_line(&mut temp)
+                .or_else(|e| Err((None, e)))?;
+            temp.trim()
+                .to_ascii_lowercase()
+        };
 
         match ans.as_str() {
             "no" | "n" => return Ok(ProgramFlow::Abort),
