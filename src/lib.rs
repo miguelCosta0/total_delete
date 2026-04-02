@@ -1,4 +1,4 @@
-use std::fs::{self, File, canonicalize};
+use std::fs::{self, File, canonicalize, metadata, remove_dir};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::result;
@@ -21,7 +21,20 @@ pub fn run(file_paths: &[String]) -> Result<()> {
     let abs_paths = get_abs_paths(file_paths)?;
 
     for path in &abs_paths {
-        println!("- {}", path.to_str().unwrap())
+        let opt_path = Some(
+            path.to_string_lossy()
+                .to_string(),
+        );
+        let ftype = if metadata(path)
+            .or_else(|e| Err((opt_path, e)))?
+            .file_type()
+            .is_dir()
+        {
+            "folder"
+        } else {
+            "file"
+        };
+        println!("- {} ({})", path.to_str().unwrap(), ftype);
     }
 
     match get_confirmation() {
@@ -42,7 +55,7 @@ pub fn run(file_paths: &[String]) -> Result<()> {
             .or_else(|e| Err((opt_path.clone(), e)))?
             .file_type();
         if file_type.is_dir() {
-            return Err((opt_path, io::Error::other("Cannot remove directory")));
+            total_delete_folder(path).or_else(|e| Err((opt_path, e)))?;
         } else {
             total_delete_file(path).or_else(|e| Err((opt_path, e)))?;
         }
@@ -89,6 +102,20 @@ fn get_confirmation() -> Result<ProgramFlow> {
 
         atempts += 1;
     }
+}
+
+fn total_delete_folder(folderpath: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(folderpath)? {
+        let entry = entry?;
+        let path = folderpath.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            total_delete_folder(&path)?;
+        } else {
+            total_delete_file(&path)?;
+        }
+    }
+    remove_dir(folderpath)?;
+    Ok(())
 }
 
 fn total_delete_file(filepath: &Path) -> io::Result<()> {
