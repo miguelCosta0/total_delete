@@ -1,5 +1,5 @@
 use std::fs::{self, File, canonicalize, metadata, remove_dir};
-use std::io::{self, Write};
+use std::io::{self, Write, stdout};
 use std::path::{Path, PathBuf};
 use std::result;
 
@@ -12,6 +12,7 @@ enum ProgramFlow {
 
 const MEBIBYTE: usize = 1024 * 1024;
 static MIB_NULL_DATA: [u8; MEBIBYTE] = [0; MEBIBYTE];
+const CLEAR_LINE: &str = "\x1B[2K\r";
 
 pub fn run(file_paths: &[String]) -> Result<()> {
     if file_paths.len() == 0 {
@@ -21,10 +22,7 @@ pub fn run(file_paths: &[String]) -> Result<()> {
     let abs_paths = get_abs_paths(file_paths)?;
 
     for path in &abs_paths {
-        let opt_path = Some(
-            path.to_string_lossy()
-                .to_string(),
-        );
+        let opt_path = Some(path.to_string_lossy().to_string());
         let ftype = if metadata(path)
             .or_else(|e| Err((opt_path, e)))?
             .file_type()
@@ -47,10 +45,7 @@ pub fn run(file_paths: &[String]) -> Result<()> {
     }
 
     for path in &abs_paths {
-        let opt_path = Some(
-            path.to_string_lossy()
-                .to_string(),
-        );
+        let opt_path = Some(path.to_string_lossy().to_string());
         let file_type = fs::metadata(path)
             .or_else(|e| Err((opt_path.clone(), e)))?
             .file_type();
@@ -81,17 +76,14 @@ fn get_confirmation() -> Result<ProgramFlow> {
         }
 
         print!("Are you sure you want to permanently delete these files? [y/n] ");
-        io::stdout()
-            .flush()
-            .or_else(|e| Err((None, e)))?;
+        io::stdout().flush().or_else(|e| Err((None, e)))?;
 
         let ans = {
             let mut temp = String::new();
             io::stdin()
                 .read_line(&mut temp)
                 .or_else(|e| Err((None, e)))?;
-            temp.trim()
-                .to_ascii_lowercase()
+            temp.trim().to_ascii_lowercase()
         };
 
         match ans.as_str() {
@@ -119,19 +111,15 @@ fn total_delete_folder(folderpath: &Path) -> io::Result<()> {
 }
 
 fn total_delete_file(filepath: &Path) -> io::Result<()> {
-    let mut file = File::options()
-        .read(true)
-        .write(true)
-        .open(&filepath)?;
+    let mut file = File::options().read(true).write(true).open(&filepath)?;
     let file_size = file.metadata()?.len() as usize;
     let mut writen_len: usize = 0;
+    let title = format!("Deleting {}...", filepath.to_str().unwrap());
 
-    let mut progress_fmt = String::from("00.00%");
-    print!(
-        "Deleting {}... {}",
-        filepath.to_str().unwrap(),
-        progress_fmt
-    );
+    let mut out = stdout().lock();
+
+    write!(out, "{} 00.00%", title).unwrap();
+    out.flush().unwrap();
 
     while writen_len < file_size {
         let remain_len = file_size - writen_len;
@@ -141,26 +129,19 @@ fn total_delete_file(filepath: &Path) -> io::Result<()> {
             writen_len += file.write(&MIB_NULL_DATA)?;
         }
 
-        let new_progress_fmt = {
+        let progress_str = {
             let progress = 100.0 * writen_len as f32 / file_size as f32;
             format!("{:05.2}%", progress)
         };
 
-        update_text_in_terminal(&progress_fmt, &new_progress_fmt);
-        progress_fmt = new_progress_fmt;
+        write!(out, "{}{} {}", CLEAR_LINE, title, progress_str).unwrap();
+        out.flush().unwrap();
     }
 
-    update_text_in_terminal(&progress_fmt, "Done");
-    println!();
+    write!(out, "{}{} Done\n", CLEAR_LINE, title).unwrap();
 
     file.flush()?;
     fs::remove_file(&filepath)?;
 
     Ok(())
-}
-
-fn update_text_in_terminal(old: &str, new: &str) {
-    let old_len = old.len();
-    const BS: &str = "\x08";
-    print!("{}{new:width$}", BS.repeat(old_len), width = old_len);
 }
