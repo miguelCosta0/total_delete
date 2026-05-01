@@ -1,6 +1,10 @@
-use std::fs::{self, File, canonicalize, metadata, remove_dir};
+mod file_type;
+
+use file_type::FileType;
+
+use std::fs::{self, File, canonicalize, remove_dir};
 use std::io::{self, Write, stdout};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::result;
 
 type Result<T> = result::Result<T, (Option<String>, io::Error)>;
@@ -23,16 +27,8 @@ pub fn run(file_paths: &[String]) -> Result<()> {
 
     for path in &abs_paths {
         let opt_path = Some(path.to_string_lossy().to_string());
-        let ftype = if metadata(path)
-            .or_else(|e| Err((opt_path, e)))?
-            .file_type()
-            .is_dir()
-        {
-            "folder"
-        } else {
-            "file"
-        };
-        println!("- {} ({})", path.to_str().unwrap(), ftype);
+        let file_type = FileType::new(path).or_else(|e| Err((opt_path, e)))?;
+        println!("- {} ({})", path.display(), file_type);
     }
 
     match get_confirmation() {
@@ -46,14 +42,7 @@ pub fn run(file_paths: &[String]) -> Result<()> {
 
     for path in &abs_paths {
         let opt_path = Some(path.to_string_lossy().to_string());
-        let file_type = fs::metadata(path)
-            .or_else(|e| Err((opt_path.clone(), e)))?
-            .file_type();
-        if file_type.is_dir() {
-            total_delete_folder(path).or_else(|e| Err((opt_path, e)))?;
-        } else {
-            total_delete_file(path).or_else(|e| Err((opt_path, e)))?;
-        }
+        total_delete(path).or_else(|e| Err((opt_path, e)))?;
     }
 
     Ok(())
@@ -62,10 +51,33 @@ pub fn run(file_paths: &[String]) -> Result<()> {
 fn get_abs_paths(paths: &[String]) -> Result<Vec<PathBuf>> {
     let mut abs_paths: Vec<PathBuf> = Vec::with_capacity(paths.len());
     for path in paths {
-        let abspath = canonicalize(path).or_else(|err| Err((Some(path.to_string()), err)))?;
-        abs_paths.push(abspath);
+        let opt_path = Some(path.clone());
+        let path = Path::new(path);
+        let abs_path = if path.is_symlink() {
+            get_symlink_abs_path(path)
+        } else {
+            canonicalize(path).or_else(|err| Err((opt_path, err)))?
+        };
+        abs_paths.push(abs_path);
     }
     Ok(abs_paths)
+}
+
+fn get_symlink_abs_path(path: &Path) -> PathBuf {
+    if path.has_root() {
+        return path.to_path_buf();
+    }
+
+    let mut abs_path = Path::new(".").canonicalize().unwrap();
+    for comp in path.components() {
+        match comp {
+            Component::ParentDir => _ = abs_path.pop(),
+            Component::Normal(c) => abs_path.push(c),
+            _ => (),
+        }
+    }
+
+    abs_path
 }
 
 fn get_confirmation() -> Result<ProgramFlow> {
@@ -96,25 +108,37 @@ fn get_confirmation() -> Result<ProgramFlow> {
     }
 }
 
-fn total_delete_folder(folderpath: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(folderpath)? {
-        let entry = entry?;
-        let path = folderpath.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            total_delete_folder(&path)?;
-        } else {
-            total_delete_file(&path)?;
-        }
+fn total_delete(path: &Path) -> io::Result<()> {
+    let file_type = FileType::new(path)?;
+    match file_type {
+        FileType::Dir => delete_folder(path)?,
+        FileType::File => delete_file(path)?,
+        FileType::Symlink => delete_symlink(path)?,
     }
-    remove_dir(folderpath)?;
     Ok(())
 }
 
-fn total_delete_file(filepath: &Path) -> io::Result<()> {
+fn delete_folder(folderpath: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(folderpath)? {
+        let entry = entry?;
+        let path = folderpath.join(entry.file_name());
+        total_delete(&path)?;
+    }
+
+    print!("Deleting {}... ", folderpath.display());
+    stdout().flush().unwrap();
+
+    remove_dir(folderpath)?;
+
+    println!("Done");
+    Ok(())
+}
+
+fn delete_file(filepath: &Path) -> io::Result<()> {
     let mut file = File::options().read(true).write(true).open(&filepath)?;
     let file_size = file.metadata()?.len() as usize;
     let mut writen_len: usize = 0;
-    let title = format!("Deleting {}...", filepath.to_str().unwrap());
+    let title = format!("Deleting {}...", filepath.display());
 
     let mut out = stdout().lock();
 
@@ -143,5 +167,15 @@ fn total_delete_file(filepath: &Path) -> io::Result<()> {
     file.flush()?;
     fs::remove_file(&filepath)?;
 
+    Ok(())
+}
+
+fn delete_symlink(path: &Path) -> io::Result<()> {
+    print!("Deleting {}... ", path.display());
+    stdout().flush().unwrap();
+
+    fs::remove_file(path)?;
+
+    println!("Done");
     Ok(())
 }
