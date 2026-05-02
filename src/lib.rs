@@ -9,14 +9,8 @@ use std::result;
 
 type Result<T> = result::Result<T, (Option<String>, io::Error)>;
 
-enum ProgramFlow {
-    Continue,
-    Abort,
-}
-
 const MEBIBYTE: usize = 1024 * 1024;
 static MIB_NULL_DATA: [u8; MEBIBYTE] = [0; MEBIBYTE];
-const CLEAR_LINE: &str = "\x1B[2K\r";
 
 pub fn run(file_paths: &[String]) -> Result<()> {
     if file_paths.len() == 0 {
@@ -31,13 +25,9 @@ pub fn run(file_paths: &[String]) -> Result<()> {
         println!("- {} ({})", path.display(), file_type);
     }
 
-    match get_confirmation() {
-        Ok(ProgramFlow::Continue) => (),
-        Ok(ProgramFlow::Abort) => {
-            println!("Aborting...");
-            return Ok(());
-        }
-        Err(e) => return Err(e),
+    if !continue_program() {
+        println!("Aborting...");
+        return Ok(());
     }
 
     for path in &abs_paths {
@@ -80,32 +70,26 @@ fn get_symlink_abs_path(path: &Path) -> PathBuf {
     abs_path
 }
 
-fn get_confirmation() -> Result<ProgramFlow> {
-    let mut atempts: u8 = 0;
-    loop {
-        if atempts >= 3 {
-            return Ok(ProgramFlow::Abort);
-        }
-
+fn continue_program() -> bool {
+    let mut attempts: u8 = 0;
+    while attempts < 3 {
         print!("Are you sure you want to permanently delete these files? [y/n] ");
-        io::stdout().flush().or_else(|e| Err((None, e)))?;
+        io::stdout().flush().unwrap();
 
-        let ans = {
-            let mut temp = String::new();
-            io::stdin()
-                .read_line(&mut temp)
-                .or_else(|e| Err((None, e)))?;
-            temp.trim().to_ascii_lowercase()
-        };
+        let mut ans = String::new();
+        io::stdin().read_line(&mut ans).unwrap();
+        let ans = ans.trim().to_ascii_lowercase();
 
         match ans.as_str() {
-            "no" | "n" => return Ok(ProgramFlow::Abort),
-            "yes" | "ye" | "y" => return Ok(ProgramFlow::Continue),
+            "no" | "n" => return false,
+            "yes" | "ye" | "y" => return true,
             _ => println!("Invalid answer"),
         }
 
-        atempts += 1;
+        attempts += 1;
     }
+
+    false
 }
 
 fn total_delete(path: &Path) -> io::Result<()> {
@@ -135,6 +119,7 @@ fn delete_folder(folderpath: &Path) -> io::Result<()> {
 }
 
 fn delete_file(filepath: &Path) -> io::Result<()> {
+    const CLEAR_LINE: &str = "\x1B[2K\r";
     let mut file = File::options().read(true).write(true).open(&filepath)?;
     let file_size = file.metadata()?.len() as usize;
     let mut writen_len: usize = 0;
