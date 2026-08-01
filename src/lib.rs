@@ -2,8 +2,9 @@ mod file_type;
 
 use file_type::FileType;
 
-use std::fs::{self, File, canonicalize, remove_dir};
+use std::fs::{self, File, Permissions, canonicalize, remove_dir};
 use std::io::{self, Write, stdout};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::result;
 
@@ -94,6 +95,10 @@ fn continue_program() -> bool {
 
 fn total_delete(path: &Path) -> io::Result<()> {
     let file_type = FileType::new(path)?;
+
+    let full_permissions = Permissions::from_mode(0o777);
+    fs::set_permissions(path, full_permissions)?;
+
     match file_type {
         FileType::Dir => delete_folder(path)?,
         FileType::File => delete_file(path)?,
