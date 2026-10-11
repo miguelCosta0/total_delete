@@ -1,5 +1,7 @@
+pub mod error;
 mod file_type;
 
+use error::Error;
 use file_type::FileType;
 
 use std::fs::{self, File, Permissions, canonicalize, remove_dir};
@@ -8,21 +10,23 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::result;
 
-type Result<T> = result::Result<T, (Option<String>, io::Error)>;
+type Result<T> = result::Result<T, Error>;
 
 const MEBIBYTE: usize = 1024 * 1024;
 static MIB_NULL_DATA: [u8; MEBIBYTE] = [0; MEBIBYTE];
 
 pub fn run(file_paths: &[String]) -> Result<()> {
     if file_paths.len() == 0 {
-        return Err((None, io::Error::other("No arguments provided")));
+        return Err(Error {
+            error: io::Error::other("No arguments provided"),
+            path: None,
+        });
     }
 
     let abs_paths = get_abs_paths(file_paths)?;
 
     for path in &abs_paths {
-        let opt_path = Some(path.to_string_lossy().to_string());
-        let file_type = FileType::new(path).or_else(|e| Err((opt_path, e)))?;
+        let file_type = FileType::new(path).or_else(|e| Err(Error::with_path(e, path)))?;
         println!("- {} ({})", path.display(), file_type);
     }
 
@@ -32,8 +36,7 @@ pub fn run(file_paths: &[String]) -> Result<()> {
     }
 
     for path in &abs_paths {
-        let opt_path = Some(path.to_string_lossy().to_string());
-        total_delete(path).or_else(|e| Err((opt_path, e)))?;
+        total_delete(path)?;
     }
 
     Ok(())
@@ -42,12 +45,11 @@ pub fn run(file_paths: &[String]) -> Result<()> {
 fn get_abs_paths(paths: &[String]) -> Result<Vec<PathBuf>> {
     let mut abs_paths: Vec<PathBuf> = Vec::with_capacity(paths.len());
     for path in paths {
-        let opt_path = Some(path.clone());
         let path = Path::new(path);
         let abs_path = if path.is_symlink() {
             get_symlink_abs_path(path)
         } else {
-            canonicalize(path).or_else(|err| Err((opt_path, err)))?
+            canonicalize(path).or_else(|e| Err(Error::with_path(e, path)))?
         };
         abs_paths.push(abs_path);
     }
@@ -93,23 +95,24 @@ fn continue_program() -> bool {
     false
 }
 
-fn total_delete(path: &Path) -> io::Result<()> {
-    let file_type = FileType::new(path)?;
+fn total_delete(path: &Path) -> Result<()> {
+    let file_type = FileType::new(path).or_else(|e| Err(Error::with_path(e, path)))?;
 
     let full_permissions = Permissions::from_mode(0o777);
-    fs::set_permissions(path, full_permissions)?;
+    fs::set_permissions(path, full_permissions).or_else(|e| Err(Error::with_path(e, path)))?;
 
     match file_type {
         FileType::Dir => delete_folder(path)?,
-        FileType::File => delete_file(path)?,
-        FileType::Symlink => delete_symlink(path)?,
+        FileType::File => delete_file(path).or_else(|e| Err(Error::with_path(e, path)))?,
+        FileType::Symlink => delete_symlink(path).or_else(|e| Err(Error::with_path(e, path)))?,
     }
     Ok(())
 }
 
-fn delete_folder(folderpath: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(folderpath)? {
-        let entry = entry?;
+fn delete_folder(folderpath: &Path) -> Result<()> {
+    let dir_entries = fs::read_dir(folderpath).or_else(|e| Err(Error::with_path(e, folderpath)))?;
+    for entry in dir_entries {
+        let entry = entry.or_else(|e| Err(Error::with_path(e, folderpath)))?;
         let path = folderpath.join(entry.file_name());
         total_delete(&path)?;
     }
@@ -117,7 +120,7 @@ fn delete_folder(folderpath: &Path) -> io::Result<()> {
     print!("Deleting {}... ", folderpath.display());
     stdout().flush().unwrap();
 
-    remove_dir(folderpath)?;
+    remove_dir(folderpath).or_else(|e| Err(Error::with_path(e, folderpath)))?;
 
     println!("Done");
     Ok(())
