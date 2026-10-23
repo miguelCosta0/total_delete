@@ -7,7 +7,7 @@ fn main() {
 
     if let Err(Error { error, path }) = total_delete::run(&args) {
         match path {
-            Some(path) => println!("ERROR at \"{}\": {}", path, error.kind()),
+            Some(path) => println!("ERROR at \"{}\": {:?}", path, error),
             None => println!("ERROR: {}", error),
         }
     };

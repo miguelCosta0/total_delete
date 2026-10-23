@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::io;
 use std::path::Path;
 
+#[derive(PartialEq)]
 pub enum FileType {
     File,
     Dir,

@@ -8,7 +8,7 @@ use std::fs::{self, File, Permissions, canonicalize, remove_dir};
 use std::io::{self, Write, stdout};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
-use std::result;
+use std::{env, result};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -95,11 +95,25 @@ fn continue_program() -> bool {
     false
 }
 
-fn total_delete(path: &Path) -> Result<()> {
+fn total_delete(path: &PathBuf) -> Result<()> {
     let file_type = FileType::new(path).or_else(|e| Err(Error::with_path(e, path)))?;
 
-    let full_permissions = Permissions::from_mode(0o777);
-    fs::set_permissions(path, full_permissions).or_else(|e| Err(Error::with_path(e, path)))?;
+    let prohibited_paths = vec![
+        env::home_dir().unwrap(),
+        env::home_dir().unwrap().join(".config"),
+    ];
+
+    if prohibited_paths.contains(&path) {
+        return Err(Error::with_path(
+            io::Error::new(io::ErrorKind::Other, "Prohibited path"),
+            path,
+        ));
+    }
+
+    if file_type != FileType::Symlink {
+        let full_permissions = Permissions::from_mode(0o777);
+        fs::set_permissions(path, full_permissions).or_else(|e| Err(Error::with_path(e, path)))?;
+    }
 
     match file_type {
         FileType::Dir => delete_folder(path)?,
