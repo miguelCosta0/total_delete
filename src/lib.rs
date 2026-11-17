@@ -1,59 +1,51 @@
-pub mod error;
 mod file_type;
 
-use error::Error;
 use file_type::FileType;
 
+use std::env;
 use std::fs::{self, File, Permissions, canonicalize, remove_dir};
 use std::io::{self, Write, stdout};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
-use std::{env, result};
-
-type Result<T> = result::Result<T, Error>;
 
 const MEBIBYTE: usize = 1024 * 1024;
 static MIB_NULL_DATA: [u8; MEBIBYTE] = [0; MEBIBYTE];
 
-pub fn run(file_paths: &[String]) -> Result<()> {
+pub fn run(file_paths: &[String]) {
     if file_paths.len() == 0 {
-        return Err(Error {
-            error: io::Error::other("No arguments provided"),
-            path: None,
-        });
+        println!("No arguments provided.");
+        return;
     }
 
-    let abs_paths = get_abs_paths(file_paths)?;
+    let abs_paths = get_abs_paths(file_paths);
 
     for path in &abs_paths {
-        let file_type = FileType::new(path).or_else(|e| Err(Error::with_path(e, path)))?;
+        let file_type = FileType::new(path).unwrap();
         println!("- {} ({})", path.display(), file_type);
     }
 
     if !continue_program() {
         println!("Aborting...");
-        return Ok(());
+        return;
     }
 
     for path in &abs_paths {
-        total_delete(path)?;
+        total_delete(path).unwrap();
     }
-
-    Ok(())
 }
 
-fn get_abs_paths(paths: &[String]) -> Result<Vec<PathBuf>> {
+fn get_abs_paths(paths: &[String]) -> Vec<PathBuf> {
     let mut abs_paths: Vec<PathBuf> = Vec::with_capacity(paths.len());
     for path in paths {
         let path = Path::new(path);
         let abs_path = if path.is_symlink() {
             get_symlink_abs_path(path)
         } else {
-            canonicalize(path).or_else(|e| Err(Error::with_path(e, path)))?
+            canonicalize(path).unwrap()
         };
         abs_paths.push(abs_path);
     }
-    Ok(abs_paths)
+    abs_paths
 }
 
 fn get_symlink_abs_path(path: &Path) -> PathBuf {
@@ -95,8 +87,8 @@ fn continue_program() -> bool {
     false
 }
 
-fn total_delete(path: &PathBuf) -> Result<()> {
-    let file_type = FileType::new(path).or_else(|e| Err(Error::with_path(e, path)))?;
+fn total_delete(path: &PathBuf) -> io::Result<()> {
+    let file_type = FileType::new(path)?;
 
     let prohibited_paths = vec![
         env::home_dir().unwrap(),
@@ -104,29 +96,26 @@ fn total_delete(path: &PathBuf) -> Result<()> {
     ];
 
     if prohibited_paths.contains(&path) {
-        return Err(Error::with_path(
-            io::Error::new(io::ErrorKind::Other, "Prohibited path"),
-            path,
-        ));
+        panic!("Prohibited path: {}", path.display());
     }
 
     if file_type != FileType::Symlink {
         let full_permissions = Permissions::from_mode(0o777);
-        fs::set_permissions(path, full_permissions).or_else(|e| Err(Error::with_path(e, path)))?;
+        fs::set_permissions(path, full_permissions)?;
     }
 
     match file_type {
         FileType::Dir => delete_folder(path)?,
-        FileType::File => delete_file(path).or_else(|e| Err(Error::with_path(e, path)))?,
-        FileType::Symlink => delete_symlink(path).or_else(|e| Err(Error::with_path(e, path)))?,
+        FileType::File => delete_file(path)?,
+        FileType::Symlink => delete_symlink(path)?,
     }
     Ok(())
 }
 
-fn delete_folder(folderpath: &Path) -> Result<()> {
-    let dir_entries = fs::read_dir(folderpath).or_else(|e| Err(Error::with_path(e, folderpath)))?;
+fn delete_folder(folderpath: &Path) -> io::Result<()> {
+    let dir_entries = fs::read_dir(folderpath)?;
     for entry in dir_entries {
-        let entry = entry.or_else(|e| Err(Error::with_path(e, folderpath)))?;
+        let entry = entry?;
         let path = folderpath.join(entry.file_name());
         total_delete(&path)?;
     }
@@ -134,7 +123,7 @@ fn delete_folder(folderpath: &Path) -> Result<()> {
     print!("Deleting {}... ", folderpath.display());
     stdout().flush().unwrap();
 
-    remove_dir(folderpath).or_else(|e| Err(Error::with_path(e, folderpath)))?;
+    remove_dir(folderpath)?;
 
     println!("Done");
     Ok(())
